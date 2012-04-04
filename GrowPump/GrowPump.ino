@@ -6,48 +6,43 @@
 SerialLCD slcd(6,7);//this is a must, assign soft serial pins
 EthernetClient client;
 
-const int pumpPin =  3; // digital pin 3,4
+const int pumpPin = 3;
 const String remoteWebHost = "";
 const String urlToken = "";
 const IPAddress remoteAddr(0,0,0,0);
-const String deviceID = ""; //
+const String deviceID = ""; // 
 
 // Enter a MAC address and IP address for your controller below.
 // The IP address will be dependent on your local network:
-// byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };
 byte mac[] = { 
-  0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xEE };
+  0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };
+// byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xEE };
 byte rip[4];
 int seconds = 0;
 int oldSeconds = 0;
 int secondsSinceLastPoll = 0;
-int p = 1;
-int oldp = 0;
-int sensorPin1 = 0;
-int sensorPin2 = 2;
+int secondsSinceLastUpdate = 0;
+int pollCount = 1;
+int oldPollCount = 0;
 int lastMoistureReading = 0;
-int lastMoistureReading2 = 0;
-int pollInterval = 14400; // 3600; // 14400;
-int moisturePumpThreshold = 500;
-int moisturePumpThreshold2 = 500;
-boolean pumpRelayClosed = false;
+int pollInterval = 14400;
+int updateInterval = 300;
+int moisturePumpThreshold = 575;
+int pumpRelayClosed = 0;
 int pumpRelayClosedSeconds = 0;
 int pumpSecondsInterval = 7;
-int XTotalCount = 0;
-boolean intializeSuccess = false;
-boolean updateSuccess = false;
-int currentReading = 0;
+int pumpedTotalCount = 0;
+int intializeSuccess = 0;
+int updateSuccess = 0;
+int oldMoistureReading = 0;
 String localAddress = "";
-String requestUrl = "";
 
-char buf[6];
-
-IPAddress ip(192,168,1, 11);
+IPAddress ip(192,168,1,50);
 IPAddress gw(192,168,1, 1);
 IPAddress subnet(255,255,255,0);
 
 // Initialize the Ethernet server library
-// with the IP address and port you want to use 
+// with the IP address and port you want to use
 // (port 80 is default for HTTP):
 
 String getIPAddressFromStruct(IPAddress ip) {
@@ -59,74 +54,70 @@ String getIPAddressFromStruct(IPAddress ip) {
       addr = addr + ".";
     }
   }
-  return addr;  
-} 
-
-void sendUpdateToServer(String url, boolean initialize) {
-  if (initialize == 1) {
-    localAddress = "";
-    // localAddress = String(getIPAddressFromStruct(Ethernet.localIP()));    
-    // delay(10000);
-  }
-  Serial.println(url);
-  requestUrl = "GET " + url + "&U=" + urlToken + "&I=" + localAddress + " HTTP/1.1";
-  Serial.println(requestUrl);
-  Serial.println("*BEGIN*");
-  Serial.println(requestUrl);
-  Serial.println("Host: " + remoteWebHost);
-
-  if (initialize) {  
-    slcd.setCursor(8,0);
-  } 
-  else {
-    slcd.setCursor(10,0); 
-  }
-  slcd.print("TX"); 
-
-  if (client.connect(remoteAddr, 80)) {
-    client.println(requestUrl);
-    client.println("Host: " + remoteWebHost);
-    client.println();    
-    client.stop();
-    Serial.println("Connection Success - Data Transmitted");    
-    if (initialize) {
-      intializeSuccess = true;     
-    } 
-    else {
-      updateSuccess = true;
-    }
-  } 
-  else {
-    Serial.println("Connection Failed");
-    if (initialize) {
-      intializeSuccess = false;     
-    } 
-    else {
-      updateSuccess = false;
-    }
-  }
-  delay(1000);
-  Serial.println("*END*");
-  if (initialize) {  
-    slcd.setCursor(8,0);
-    if (intializeSuccess) {
-      slcd.print("OK"); 
-    } 
-    else {
-      slcd.print("ER"); 
-    }       
-  } 
-  else {
-    slcd.setCursor(10,0); 
-    if (updateSuccess) {
-      slcd.print("OK"); 
-    } 
-    else {
-      slcd.print("ER"); 
-    }   
-
-  }
+  return addr;
 }
+
+void takeMeasurements() {
+    oldMoistureReading = lastMoistureReading;
+    lastMoistureReading = analogRead(0);
+}
+
+void printIntToSerialLCD(int value, int x, int y) {
+  char buffer[6];
+  itoa(value,buffer,10);
+  slcd.setCursor(x, y);
+  slcd.print(buffer);  
+}
+
+void updateTransmitStatuses () {
+    slcd.setCursor(8, 0);
+    if (intializeSuccess == 0) {
+      slcd.print("-");
+    } else {
+      slcd.print("+");
+    }
+    slcd.setCursor(9,0);
+    if (updateSuccess == 0) {
+      slcd.print("-");
+    } else {
+      slcd.print("+");
+    }    
+}
+
+void sendUpdate() {
+  slcd.setCursor(9, 0);
+  slcd.print("*");
+  Serial.println("GET /u/?U=" + urlToken + "&D=" + deviceID + "&p=" + String(pollCount) + "&m1o=" + String(oldMoistureReading) + "&m1n=" + String(lastMoistureReading) + "&X=" + String(pumpedTotalCount) + " HTTP/1.1");
+  if (client.connect(remoteAddr, 80)) {
+    client.println("GET /u/?U=" + urlToken + "&D=" + deviceID + "&p=" + String(pollCount) + "&m1o=" + String(oldMoistureReading) + "&m1n=" + String(lastMoistureReading) + "&X="  + String(pumpedTotalCount) + " HTTP/1.1");
+    client.println("Host: " + remoteWebHost);
+    client.println();
+    client.stop();
+    updateSuccess = 1;
+  } 
+  else {
+    updateSuccess = 0;
+  }  
+  updateTransmitStatuses();
+}
+
+void initializeData() {
+  slcd.setCursor(8, 0);
+  slcd.print("*");
+  Serial.println("GET /i/?U=" + urlToken + "&D=" + deviceID + "&p=0&m1n=" + String(lastMoistureReading) + " HTTP/1.1");
+  if (client.connect(remoteAddr, 80)) {
+    client.println("GET /i/?U=" + urlToken + "&D=" + deviceID + "&p=0&m1n=" + String(lastMoistureReading) + " HTTP/1.1");
+    client.println("Host: " + remoteWebHost);
+    client.println();
+    client.stop();
+    intializeSuccess = 1;
+  } 
+  else {
+    intializeSuccess = 0;
+  }
+  updateTransmitStatuses();
+}
+
 
 void setupEthernetConnection() {
   if (!Ethernet.begin(mac)) {
@@ -135,7 +126,7 @@ void setupEthernetConnection() {
     Ethernet.begin(mac, ip, gw, subnet);
   } 
   else {
-    Serial.println("DHCP success"); 
+    Serial.println("DHCP success");
   }
   // wait for the ethernet connection to initialize
   delay(10000);
@@ -152,26 +143,12 @@ void setup()
   setupEthernetConnection();
 
   slcd.begin();
-  // slcd.backlight();
-
   slcd.clear();
-
-
   slcd.setCursor(0, 0);
   slcd.print(">");
 
-  // poll the sensor
-  lastMoistureReading = analogRead(sensorPin1);
-  if (sensorPin2 >= 0) {
-    lastMoistureReading2 = analogRead(sensorPin2);
-  }
-  if (sensorPin2 >= 0) {
-    currentReading =  ((lastMoistureReading*2)+(lastMoistureReading2)) / 3;
-    sendUpdateToServer("/i/?ID=" + deviceID + "&p=0&m1_n=" + String(lastMoistureReading) + "&m2_n=" + String(lastMoistureReading2) + "&man=" + String(currentReading),true);  
-  } 
-  else {
-    sendUpdateToServer("/i/?ID=" + deviceID + "&p=0&m1_n=" + String(lastMoistureReading),true);
-  }
+  takeMeasurements();
+  initializeData();
 }
 
 void loop()
@@ -179,238 +156,103 @@ void loop()
 
   seconds = millis() / 1000;
   int secdiff = seconds - oldSeconds;
-  secondsSinceLastPoll += secdiff;  
-
-  // update every 5 minutes the current sensor measurements
-  if ((secdiff > 0) && ((secondsSinceLastPoll % 300) == 0)) {
-
-    lastMoistureReading = analogRead(sensorPin1);    
-    slcd.setCursor(0, 1); 
-    itoa(lastMoistureReading,buf,10);
-    slcd.print(buf);
-
-    currentReading = lastMoistureReading;
-
-    if (sensorPin2 >= 0) {
-      lastMoistureReading2 = analogRead(sensorPin2);
-      currentReading =  ((lastMoistureReading*2)+(lastMoistureReading2)) / 3;
-
-      slcd.setCursor(3, 1); 
-      slcd.print("/");
-      slcd.setCursor(4, 1); 
-      itoa(lastMoistureReading2,buf,10);
-      slcd.print(buf);       
-      slcd.setCursor(7, 1); 
-      slcd.print("/");
-      slcd.setCursor(8, 1); 
-      itoa(currentReading,buf,10);
-      slcd.print(buf);       
-    }    
+  secondsSinceLastPoll += secdiff;
+  secondsSinceLastUpdate += secdiff;
+  
+  if ((secondsSinceLastUpdate >= updateInterval) && (secondsSinceLastPoll < pollInterval))  {
+    secondsSinceLastUpdate = 0;
+    takeMeasurements();
+    printIntToSerialLCD(lastMoistureReading,0,1);
+    sendUpdate();
   }
 
-  if ((secdiff > 0) && ((secondsSinceLastPoll % pollInterval) == 0)) {
-    p += 1;
+  if (secondsSinceLastPoll >= pollInterval) {
+    pollCount += 1;
     secondsSinceLastPoll = 0;
+    secondsSinceLastUpdate = 0;
     slcd.clear();
     slcd.setCursor(0, 0);
     slcd.print(">");
 
-    itoa(p,buf,10);
-    slcd.setCursor((16-(strlen(buf))),0);  
-    slcd.print(buf);    
+    char buf3[3];
+    itoa(pollCount,buf3,10);
+    slcd.setCursor((16-(strlen(buf3))),0);
+    slcd.print(buf3);
 
-    slcd.setCursor(0, 1); 
+    slcd.setCursor(0, 1);
+    char buf[5];
     itoa(lastMoistureReading,buf,10);
     slcd.print(buf);
 
+    char buf4[3];
+    itoa(pumpedTotalCount,buf4,10);
+    slcd.setCursor((16-(strlen(buf4))),1);
+    slcd.print(buf4);
 
-    if (sensorPin2 >= 0) {
-      slcd.setCursor(3, 1); 
-      slcd.print("/");
-      slcd.setCursor(4, 1); 
-      itoa(lastMoistureReading2,buf,10);
-      slcd.print(buf);       
-      slcd.setCursor(7, 1); 
-      slcd.print("/");
-      slcd.setCursor(8, 1); 
-      itoa(currentReading,buf,10);
-      slcd.print(buf);       
-    }
-
-    itoa(XTotalCount,buf,10);
-    slcd.setCursor((16-(strlen(buf))),1);  
-    slcd.print(buf);    
-
-    slcd.setCursor(8,0);
-    if (intializeSuccess) {
-      slcd.print("OK"); 
-    } 
-    else {
-      slcd.print("ER"); 
-    }
-
-    slcd.setCursor(10,0);
-    if (updateSuccess) {
-      slcd.print("OK"); 
-    } 
-    else {
-      slcd.print("ER"); 
-    }          
+      updateTransmitStatuses();
   }
 
-  if (p != oldp) {
-    slcd.setCursor(8,0);
-    if (intializeSuccess) {
-      slcd.print("OK"); 
-    } 
-    else {
-      slcd.print("ER"); 
-    }
-    slcd.setCursor(10,0);
-    if (updateSuccess) {
-      slcd.print("OK"); 
-    } 
-    else {
-      slcd.print("ER"); 
-    }      
+  if (pollCount != oldPollCount) {
+    updateTransmitStatuses();
 
-    oldp = p;
+    oldPollCount = pollCount;
 
-    itoa(p,buf,10);
-    slcd.setCursor((16-(strlen(buf))),0);  
-    slcd.print(buf);    
+    char buf3[3];
+    itoa(pollCount,buf3,10);
+    slcd.setCursor((16-(strlen(buf3))),0);
+    slcd.print(buf3);
 
-    // poll the sensor
-    lastMoistureReading = analogRead(sensorPin1);    
-    if (sensorPin2 >= 0) {
-      lastMoistureReading2 = analogRead(sensorPin2);
-    }
-    slcd.setCursor(0, 1); 
-    itoa(lastMoistureReading,buf,10);
-    slcd.print(buf);
+    takeMeasurements();
+    printIntToSerialLCD(lastMoistureReading,0,1);
 
-    boolean moistureThresholdReaching = (lastMoistureReading <= moisturePumpThreshold);
-
-    currentReading = lastMoistureReading;
-    if (sensorPin2 >= 0) {
-      currentReading =  ((lastMoistureReading*2)+(lastMoistureReading2)) / 3;
-      moistureThresholdReaching = ((lastMoistureReading <= moisturePumpThreshold) && (lastMoistureReading <= moisturePumpThreshold2));
-    }
-
-    if (sensorPin2 >= 0) {
-      slcd.setCursor(3, 1); 
-      slcd.print("/");
-      slcd.setCursor(4, 1); 
-      itoa(lastMoistureReading2,buf,10);
-      slcd.print(buf);       
-      slcd.setCursor(7, 1); 
-      slcd.print("/");
-      slcd.setCursor(8, 1); 
-      itoa(currentReading,buf,10);
-      slcd.print(buf);       
-    }
-
-    if ((p > 1) && (pumpRelayClosed) && (moistureThresholdReaching)) {
+    if ((pollCount > 1) && (pumpRelayClosed == 0) && (lastMoistureReading < moisturePumpThreshold)) {
       Serial.println("Pumping Water");
       // turn on relay for a few seconds to pump water
-      pumpRelayClosed = true;
+      pumpRelayClosed = 1;
       pumpRelayClosedSeconds = 0;
-      digitalWrite(pumpPin, HIGH);  
-      XTotalCount++; 
+      digitalWrite(pumpPin, HIGH);
+      pumpedTotalCount++;
 
-      itoa(XTotalCount,buf,10);
-      slcd.setCursor((16-(strlen(buf))),1);  
-      slcd.print(buf);      
+      char buf4[3];
+      itoa(pumpedTotalCount,buf4,10);
+      slcd.setCursor((16-(strlen(buf4))),1);
+      slcd.print(buf4);
 
-      slcd.setCursor((16-(strlen(buf)))-1,1);  
-      slcd.print("*");        
+      slcd.setCursor((16-(strlen(buf4)))-1,1);
+      slcd.print("*");
     } 
     else {
-      if (sensorPin2 > 0) {
-        sendUpdateToServer("/u/?ID=" + deviceID + "&p=" + String(p) + "&m1_n=" + String(lastMoistureReading) + "&m2_n=" + String(lastMoistureReading2) + "&man=" + String(currentReading), false);              
-      } 
-      else {
-        sendUpdateToServer("/u/?ID=" + deviceID + "&p=" + String(p) + "&m1_n=" + String(lastMoistureReading), false);      
-      }
+      sendUpdate();
     }
   }
 
-  if (pumpRelayClosed) {
-    pumpRelayClosedSeconds += secdiff;    
+  if (pumpRelayClosed == 1) {
+    pumpRelayClosedSeconds += secdiff;
+
   }
 
-  if ((pumpRelayClosed) && (pumpRelayClosedSeconds >= pumpSecondsInterval)) {
+  if ((pumpRelayClosed == 1) && (pumpRelayClosedSeconds >= pumpSecondsInterval)) {
     // turn the pump off
-    pumpRelayClosed = false;    
-    digitalWrite(pumpPin, LOW);         
+    pumpRelayClosed = 0;
+    digitalWrite(pumpPin, LOW);
 
-    itoa(XTotalCount,buf,10);
-    slcd.setCursor((16-(strlen(buf))),1);  
-    slcd.print(buf);      
+    char buf4[3];
+    itoa(pumpedTotalCount,buf4,10);
+    slcd.setCursor((16-(strlen(buf4))),1);
+    slcd.print(buf4);
 
-    slcd.setCursor((16-(strlen(buf)))-1,1);  
+    slcd.setCursor((16-(strlen(buf4)))-1,1);
     slcd.print(" ");
 
-    int oldMoistureReading = lastMoistureReading;
-    int oldMoistureReading2 = lastMoistureReading2;
-    // poll the sensor
-    lastMoistureReading = analogRead(sensorPin1);    
-    if (sensorPin2 >= 0) {
-      lastMoistureReading2 = analogRead(sensorPin2);
-    }
-
-    slcd.setCursor(0, 1); 
-    itoa(lastMoistureReading,buf,10);
-    slcd.print(buf);
-
-    if (sensorPin2 >= 0) {
-      slcd.setCursor(3, 1); 
-      slcd.print("/");
-      slcd.setCursor(4, 1); 
-      itoa(lastMoistureReading2,buf,10);
-      slcd.print(buf);     
-    }
-    if (sensorPin2 >= 0) {
-      int oldReading  =  ((oldMoistureReading*2)+(oldMoistureReading2)) / 3;
-      currentReading =  ((lastMoistureReading*2)+(lastMoistureReading2)) / 3;
-      sendUpdateToServer("/u/?ID=" + deviceID + "&p=" + String(p) + "&m1_o=" + String(oldMoistureReading) + "&m1_n=" + String(lastMoistureReading) + "&m2_o=" + String(oldMoistureReading2) + "&m2_n=" + String(lastMoistureReading2) + "&mao=" + String(oldReading) + "&man=" + String(currentReading) + "&X=1", false);      
-    } 
-    else {
-      sendUpdateToServer("/u/?ID=" + deviceID + "&p=" + String(p) + "&m1_o=" + String(oldMoistureReading) + "&m1_n=" + String(lastMoistureReading) + "&X=1", false);
-    }
-
+    takeMeasurements();
+    printIntToSerialLCD(lastMoistureReading,0,1);
+    sendUpdate();
   }
 
   oldSeconds = seconds;
 
   if (secdiff > 0) {
-    int remainingSeconds = pollInterval - secondsSinceLastPoll;
-    slcd.setCursor(1,0);  
-    itoa(secondsSinceLastPoll,buf,10);
-    slcd.print(buf);    
-  }
-}
-
-// help functions
-// from: https://gist.github.com/744925
-
-void urlencode(char* dest, char* src) {
-  int i;
-  for(i = 0; i < strlen(src); i++) {
-    char c = src[i];
-    if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
-      (c >= '0' && c <= '9') ||
-      c == '-' || c == '_' || c == '.' || c == '~') {
-      char t[2];
-      t[0] = c; 
-      t[1] = '\0';
-      strcat(dest, t);
-    } 
-    else {
-      char t[4];
-      snprintf(t, sizeof(t), "%%%02x", c & 0xff);
-      strcat(dest, t);
-    }
+    printIntToSerialLCD(secondsSinceLastPoll,1,0);
   }
 }
 
